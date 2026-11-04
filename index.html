@@ -1,0 +1,72 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101828">
+  <meta name="description" content="RPG em turnos: escolha três princesas e explore dez andares da masmorra.">
+  <title>DanMachi — A masmorra das princesas</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="./items.js" defer></script>
+  <script src="./combat.js" defer></script>
+  <script src="./storage.js" defer></script>
+  <script src="./item-ui.js" defer></script>
+  <script src="./script.js" defer></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="#menu">DM <span>DanMachi</span></a><span class="badge">Protótipo · Aventura em turnos</span></header>
+  <main>
+    <section id="menu" aria-labelledby="title">
+      <p class="eyebrow">Uma aventura em dez andares</p>
+      <h1 id="title" tabindex="-1">DanMachi</h1>
+      <p class="lead">Uma espada. Uma masmorra.<br>Três princesas para resgatar.</p>
+      <div class="menu-art" aria-hidden="true"><span class="sprite finn"></span><span class="gate">♜</span><span class="sprite monster"></span></div>
+      <p>Escolha três princesas, enfrente os monstros da masmorra e avance até o Rei Gelado.</p>
+      <nav class="menu-actions" aria-label="Menu principal">
+        <a class="button primary" href="#princesses">Nova aventura <small>Escolher princesas</small></a>
+        <button id="continue-adventure" disabled>Continuar <small>Retomar aventura salva</small></button>
+        <a class="button" href="#ranking">Ranking</a>
+        <a class="button" href="#help">Como jogar</a>
+      </nav>
+    </section>
+    <section id="princesses" aria-labelledby="princess-title" hidden>
+      <div class="section-head"><div><p class="eyebrow">Prepare sua aventura</p><h1 id="princess-title" tabindex="-1">Escolha três princesas</h1></div><a class="button compact" href="#menu">Voltar ao menu</a></div>
+      <p>Desmarque uma princesa para escolher outra. Selecione exatamente três personagens diferentes para iniciar uma nova campanha.</p>
+      <p id="api-status" class="notice" role="status" aria-live="polite">Catálogo local pronto. A API será consultada ao abrir esta tela.</p>
+      <button id="retry-api" type="button">Consultar API novamente</button>
+      <form id="princess-form">
+        <fieldset><legend>Princesas disponíveis</legend><div id="princess-list" class="princess-grid"></div></fieldset>
+        <p id="selection-count" role="status" aria-live="polite">3 / 3 princesas selecionadas</p>
+        <button class="primary" id="start-adventure" type="submit">Iniciar nova aventura</button>
+      </form>
+    </section>
+    <section id="combat" aria-labelledby="combat-title" hidden>
+      <div class="section-head"><div><p id="combat-progress" class="eyebrow">Andar 1 / 10 · Combate 1 / 3</p><h1 id="combat-title" tabindex="-1">À entrada da masmorra</h1></div><a class="button compact" href="#menu">Voltar ao menu</a></div>
+      <p id="story" class="notice"></p>
+      <p id="rescue-status" role="status" aria-live="polite">Nenhuma princesa resgatada ainda.</p>
+      <p class="muted">A vida é mantida entre batalhas. Gerencie equipamentos, poções e fusões nos intervalos. Ao concluir um andar, resolva as recompensas antes de continuar.</p>
+      <div class="arena">
+        <article class="fighter"><h2>Finn <span id="finn-level">Nível 1</span></h2><label for="finn-hp">Vida · 20 / 20</label><progress id="finn-hp" value="20" max="20">20 de 20</progress><div class="stage"><span class="sprite finn" role="img" aria-label="Aventureiro provisório em pixel art original"></span></div></article>
+        <span class="versus" aria-hidden="true">×</span>
+        <article class="fighter enemy"><h2><span id="enemy-name" class="enemy-name">Monstro</span> <span id="enemy-level">Nível 1</span></h2><label for="enemy-hp">Vida · 25 / 25</label><progress id="enemy-hp" value="25" max="25">25 de 25</progress><div class="stage"><span class="sprite monster" role="img" aria-label="Monstro provisório em pixel art original"></span></div></article>
+      </div>
+      <div class="dashboard"><article class="panel"><h2>Atributos de Finn</h2><dl class="stats"><div><dt>Dano base</dt><dd id="stat-damage">15</dd></div><div><dt>Sorte base</dt><dd id="stat-luck">5</dd></div><div><dt>Armadura base</dt><dd id="stat-armor">0</dd></div><div><dt>Estrelas</dt><dd id="stat-stars">0 / 3</dd></div></dl><p id="effective-stats" class="muted"></p><label for="xp">Experiência · 0 / 20</label><progress id="xp" value="0" max="20">0 de 20</progress></article>
+      <article class="panel"><h2>Equipamentos</h2><ul id="equipment-list" class="equipment item-equipment" aria-label="Três slots de equipamentos"></ul><p id="active-effects" class="muted">Efeitos temporários: nenhum.</p></article>
+      <article class="panel"><h2>Inventário <span id="inventory-count">0 / 5</span></h2><ol id="inventory-slots" class="inventory-grid" aria-label="Cinco espaços de armazenamento"></ol><p class="muted">Toque em um item para ver detalhes. Equipamentos ficam separados do inventário.</p></article></div>
+      <div class="actions"><button class="primary" id="attack">Atacar <small>A · seu turno</small></button><button id="defend">Defender <small>D · seu turno</small></button><button id="next-battle" hidden>Próxima batalha</button><button id="restart" hidden>Nova aventura</button></div>
+      <article id="level-up" class="panel" hidden><h2>Evolução de Finn</h2><p id="upgrade-count" role="status" aria-live="polite"></p><div class="actions"><button data-attribute="maxHp">Vida +5</button><button data-attribute="damage">Dano +5</button><button data-attribute="luck">Sorte +2</button><button data-attribute="armor">Armadura +3</button></div></article>
+      <section id="rewards" class="panel rewards-panel" aria-labelledby="reward-heading" tabindex="-1" hidden><h2 id="reward-heading">Recompensas do andar</h2><p id="reward-summary" role="status" aria-live="polite"></p><div id="reward-list" class="reward-grid"></div></section>
+      <article class="panel fusion-panel"><h2>Fusão de itens</h2><p class="muted">Nos detalhes de cada item, escolha Fusão 1 ou Fusão 2. Combine dois itens do mesmo tipo e raridade; amuletos também precisam do mesmo atributo. Toque em um slot ocupado para removê-lo da seleção.</p><div id="fusion-slots" class="fusion-slots" aria-label="Dois slots de fusão"></div><button id="fuse-items" type="button">Fundir</button><p id="item-status" role="status" aria-live="polite" aria-atomic="true"></p></article>
+      <article class="panel log"><h2>Registro de eventos</h2><p id="feedback" role="status" aria-live="polite" aria-atomic="true">Finn está pronto. Escolha uma ação para testar a interface.</p></article>
+    </section>
+    <section id="ranking" aria-labelledby="ranking-title" hidden><p class="eyebrow">Placar compartilhado</p><h1 id="ranking-title" tabindex="-1">Ranking</h1><p class="notice">Ranking global indisponível</p><p>A integração Supabase será preparada na etapa 9. Não há servidor configurado, resultados enviados ou placar online nesta versão.</p><a class="button" href="#menu">Voltar ao menu</a></section>
+    <section id="help" aria-labelledby="help-title" hidden><p class="eyebrow">Guia do aventureiro</p><h1 id="help-title" tabindex="-1">Como jogar</h1><p>Escolha três princesas, atravesse dez andares com três monstros por andar e enfrente o Rei Gelado.</p><ul class="guide"><li>Atacar usa todo o dano e pode causar crítico.</li><li>Defender causa metade do dano, sem crítico, e aumenta apenas a defesa do escudo em 40% durante a resposta.</li><li>Após derrotar um monstro, use Próxima batalha. Após o terceiro, receba ou descarte os drops e avance de andar. Não existe cura automática.</li><li>Entre combates, toque nos itens para equipar, desequipar, usar poções ou descartar com confirmação. Cada equipamento tem um slot separado dos cinco espaços de inventário.</li><li>Poções de dano e armadura duram cinco ações de Finn e continuam ativas entre andares. Duas poções iguais renovam a duração, sem acumular bônus.</li><li>Para fundir, selecione dois itens do inventário nos slots Fusão 1 e Fusão 2 e pressione Fundir. Exige mesmo tipo e raridade; amuletos também exigem mesmo atributo. Lendários não podem ser fundidos.</li><li>Ao evoluir, escolha dois bônus de atributos. Você pode repetir a escolha. Melhorar Vida aumenta a vida atual e máxima.</li><li>Use Tab e Shift+Tab para navegar; Enter ou Espaço para ativar botões. A para Atacar e D para Defender. Escape fecha uma janela ou volta ao menu.</li></ul><p class="notice">O progresso é salvo automaticamente neste navegador, incluindo itens, recompensas pendentes e efeitos. Ranking online, cronômetro e salas bônus ainda estão pendentes.</p><a class="button" href="#menu">Voltar ao menu</a></section>
+  </main>
+  <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
+  <dialog id="item-details" aria-labelledby="item-detail-title"><h2 id="item-detail-title">Item selecionado</h2><p id="item-detail-rarity"></p><p id="item-detail-description"></p><p id="item-detail-hint" class="muted"></p><div id="item-detail-actions" class="item-actions"><button id="equip-item" type="button">Equipar</button><button id="unequip-item" type="button">Desequipar</button><button id="use-item" type="button">Usar</button><button id="discard-item" type="button">🗑 Descartar</button><button id="fusion-first" type="button">Fusão 1</button><button id="fusion-second" type="button">Fusão 2</button></div><button id="close-item" class="dialog-close" type="button">Fechar</button></dialog>
+  <dialog id="confirm-item" aria-labelledby="confirm-title"><h2 id="confirm-title">Confirmar descarte</h2><p id="confirm-message"></p><div class="item-actions"><button id="confirm-yes" type="button">Descartar</button><button id="confirm-no" type="button" autofocus>Cancelar</button></div></dialog>
+  <dialog id="inventory-full" aria-labelledby="full-title"><h2 id="full-title">Inventário cheio</h2><p id="replacement-description"></p><label for="replacement-slot">Item que será descartado</label><select id="replacement-slot"></select><div class="item-actions"><button id="replace-reward" type="button" disabled>Descartar escolhido e receber</button><button id="cancel-replacement" type="button">Cancelar</button></div></dialog>
+  <footer>Protótipo acadêmico não oficial · Sem áudio · Arte provisória original em CSS</footer>
+  <noscript><p class="notice">Ative JavaScript para navegar e testar a demonstração.</p></noscript>
+</body>
+</html>

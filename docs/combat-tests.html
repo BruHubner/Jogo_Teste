@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-BR"><meta charset="utf-8"><title>Testes DanMachi</title>
+<h1>Verificação de regras e fluxo</h1><pre id="results">Executando…</pre>
+<iframe id="app" title="Aplicação em teste" style="width:390px;height:800px"></iframe>
+<script src="../items.js"></script>
+<script src="../combat.js"></script>
+<script>
+'use strict';
+const output = document.getElementById('results');
+const results = [];
+const assert = (condition, message) => { if (!condition) throw new Error(message); results.push(`PASS: ${message}`); };
+const delay = () => new Promise(resolve => setTimeout(resolve, 20));
+async function until(check) { for (let i = 0; i < 550; i++) { if (check()) return; await delay(); } throw new Error('Tempo excedido'); }
+const princesses = [1, 2, 3].map(id => ({ id, name: `Princesa ${id}`, summary: 'Resumo local' }));
+async function run() {
+  const R = window.DanMachi;
+  const create = () => R.createCampaign(princesses, () => 0.99);
+  let state = create();
+  R.playTurn(state, 'defend');
+  assert(state.hp === 14 && state.enemy.hp === 13, 'Defender aplica 12 de dano e recebe 6');
+  R.playTurn(state, 'defend'); R.playTurn(state, 'defend');
+  assert(state.hp === 8 && state.phase === 'intermission' && state.xp === 6, 'Vitória não contra-ataca e concede XP uma única vez');
+  assert(R.playTurn(state, 'attack').length === 0 && state.xp === 6, 'Não repete recompensa nem aceita ação no intervalo');
+  assert(R.nextBattle(state, () => 0.99) && state.battle === 2 && state.hp === 8, 'Próxima batalha preserva vida');
+  assert(!R.nextBattle(state), 'Clique duplicado não pula combate');
+  state = create(); R.playTurn(state, 'attack', () => 0.99);
+  assert(state.hp === 20 && state.enemy.hp === 0, 'Ataque letal impede resposta');
+  state = create(); state.enemy.hp = 100; R.playTurn(state, 'attack', () => 0);
+  assert(state.enemy.hp === 50, 'Crítico dobra dano de ataque');
+  state = create(); state.armor = 100; R.playTurn(state, 'defend');
+  assert(state.hp === 20, 'Defesa pode reduzir dano recebido a zero');
+  state = create(); state.hp = 1; R.playTurn(state, 'defend');
+  assert(state.hp === 0 && state.phase === 'gameover' && !R.nextBattle(state), 'Morte bloqueia continuação da campanha');
+  assert(R.enemyFor(1, 2, false, () => 0.29).level === 2 && R.enemyFor(1, 2, false, () => 0.30).level === 1, 'Monstro 2 respeita limite de 30%');
+  assert(R.enemyFor(1, 3, false, () => 0.74).level === 2 && R.enemyFor(1, 3, false, () => 0.75).level === 1 && R.enemyFor(10, 3, false, () => 0).level === 10, 'Monstro 3 respeita 75% e limite de nível 10');
+  state = create(); state.xp = 19; R.playTurn(state, 'attack', () => 0.99);
+  assert(state.level === 2 && state.xp === 5 && state.upgrades.length === 2 && !R.nextBattle(state), 'Evolução mantém XP excedente e exige duas escolhas');
+  R.chooseUpgrade(state, 'maxHp'); R.chooseUpgrade(state, 'maxHp');
+  assert(state.maxHp === 30 && state.hp === 30 && R.nextBattle(state), 'Escolhas repetidas de Vida aumentam HP atual e máximo');
+  state = create(); state.level = 5; state.xp = 39; R.playTurn(state, 'attack', () => 0.99);
+  const damage = state.damage; R.chooseUpgrade(state, 'damage');
+  assert(state.level === 6 && state.damage === damage + 10, 'Bônus dobrado começa na evolução para nível 6');
+  state = create(); state.damage = 1000; let fights = 0;
+  while (state.phase !== 'victory' && fights < 32) {
+    R.playTurn(state, 'attack', () => 0.999); fights++;
+    if (state.floor === 8 && state.battle === 3) assert(state.rescued.length === 1, 'Primeiro resgate garantido no andar 8');
+    if (state.floor === 9 && state.battle === 3) assert(state.rescued.length === 2, 'Segundo resgate garantido no andar 9');
+    while (state.upgrades.length) R.chooseUpgrade(state, 'armor');
+    for (const item of state.rewards.pending.slice()) window.DanMachiItems.refuseReward(state, item.id);
+    if (state.phase === 'intermission') R.nextBattle(state, () => 0.999);
+  }
+  assert(fights === 31 && state.phase === 'victory' && state.rescued.length === 3, '30 monstros, chefe e três resgates sem repetir combates (fixture de dano alto)');
+  let rejected = false;
+  try { R.createCampaign([princesses[0], princesses[0], princesses[1]]); } catch { rejected = true; }
+  assert(rejected, 'Campanha rejeita princesas duplicadas');
+
+  const frame = document.getElementById('app');
+  // Isola o salvamento de teste para nunca sobrescrever a campanha real do jogador.
+  const saved = new Map();
+  window.testStorage = { getItem: key => saved.get(key) || null, setItem: (key, value) => saved.set(key, value), removeItem: key => saved.delete(key) };
+  const appHtml = await (await fetch('../index.html')).text();
+  const root = new URL('../', location.href).href;
+  const setup = `<script>Object.defineProperty(window,'localStorage',{value:parent.testStorage});location.hash='menu';document.addEventListener('click',e=>{const a=e.target.closest('a[href^="#"]');if(a){e.preventDefault();location.hash=a.getAttribute('href')}});<\/script>`;
+  frame.srcdoc = appHtml.replaceAll('src="./', `src="${root}`).replace('href="./style.css"', `href="${root}style.css"`).replace('<head>', '<head>' + setup);
+  await until(() => frame.contentDocument?.getElementById('princess-list')?.children.length === 6);
+  const w = frame.contentWindow, d = frame.contentDocument;
+  const $ = id => d.getElementById(id);
+  const errors = [];
+  w.addEventListener('error', event => errors.push(event.message));
+  w.addEventListener('unhandledrejection', event => errors.push(String(event.reason)));
+  w.Math.random = () => 0.99;
+  if (new URLSearchParams(location.search).has('live')) {
+    let network = '';
+    const realFetch = w.fetch.bind(w);
+    w.fetch = async (...args) => {
+      try { const response = await realFetch(...args); network = `HTTP ${response.status}, tipo ${response.type}`; return response; }
+      catch (error) { network = `${error.name}: ${error.message}`; throw error; }
+    };
+    w.location.hash = 'princesses';
+    await until(() => !$('princesses').hidden && !$('retry-api').disabled);
+    results.push(`LIVE API: ${network || 'Consulta abortada antes de receber resposta'}. UI: ${$('api-status').textContent}`);
+    assert($('princess-list').children.length === 6 && !$('start-adventure').disabled, 'Consulta real não bloqueia seleção, mesmo se indisponível');
+  } else {
+    let request = '';
+    w.fetch = async url => {
+      request = url;
+      return { ok: true, json: async () => ({ query: { pages: {
+        123: { pageid: 123, title: 'Lumpy Space Princess', fullurl: 'https://adventuretime.fandom.com/wiki/Lumpy_Space_Princess' },
+        124: { pageid: 124, title: 'Flame Princess', fullurl: 'javascript:alert(1)' }
+      } } }) };
+    };
+    w.location.hash = 'princesses';
+    await until(() => !$('princesses').hidden && !$('retry-api').disabled);
+    assert(request.includes('api.php?') && request.includes('origin=') && $('api-status').textContent.includes('1 de 6'), 'Consulta usa API e só aceita metadados com fonte segura (resposta simulada)');
+    assert($('princess-list').textContent.includes('ID 123') && $('princess-list').querySelectorAll('a').length === 1, 'Metadados da resposta aparecem no cartão');
+    w.fetch = async () => { throw new TypeError('Falha de rede simulada'); };
+    $('retry-api').click();
+    await until(() => !$('retry-api').disabled);
+    assert($('api-status').textContent.includes('Catálogo offline') && !$('start-adventure').disabled, 'Falha de API mostra fallback explícito e mantém seleção');
+    w.fetch = async () => ({ ok: true, json: async () => ({ unexpected: true }) });
+    $('retry-api').click(); await until(() => !$('retry-api').disabled);
+    assert($('api-status').textContent.includes('Resposta da API inválida'), 'JSON inesperado é tratado sem travar');
+  }
+  assert($('princess-list').querySelectorAll('input:checked').length === 3, 'Três princesas padrão pré-selecionadas');
+  const inputs = $('princess-list').querySelectorAll('input');
+  assert(inputs[3].disabled, 'Quarta princesa não pode ser selecionada');
+  inputs[0].click();
+  assert($('start-adventure').disabled && !inputs[3].disabled, 'Duas escolhas bloqueiam início e liberam substituição');
+  inputs[3].click(); $('start-adventure').click();
+  await until(() => !$('combat').hidden);
+  assert($('story').textContent.includes('Princesa Gosma') && !$('story').textContent.includes('Princesa Caroço'), 'História usa exatamente as princesas escolhidas');
+  $('defend').click(); $('defend').click(); $('defend').click();
+  assert($('finn-hp').value === 8 && !$('next-battle').hidden && $('attack').disabled, 'UI mostra vitória e botão para continuar');
+  $('next-battle').click();
+  assert($('combat-progress').textContent.includes('Combate 2 / 3') && $('finn-hp').value === 8, 'Botão continua para monstro 2 sem curar');
+  $('attack').click(); $('next-battle').click(); $('attack').click();
+  assert($('next-battle').textContent === 'Avançar de andar', 'Terceira vitória oferece próximo andar');
+  assert($('next-battle').disabled && !$('rewards').hidden, 'Recompensas do andar bloqueiam avanço até decisão');
+  while ($('reward-list').children.length) {
+    $('reward-list').querySelector('[data-refuse-id]').click();
+    $('confirm-yes').click();
+  }
+  $('next-battle').click();
+  assert($('combat-progress').textContent.includes('Andar 2 / 10'), 'Andar 2 aparece na interface');
+  $('defend').click();
+  assert(!$('restart').hidden && $('next-battle').hidden && $('feedback').textContent.includes('Game Over'), 'Derrota de Finn oferece nova aventura');
+  $('restart').click(); await until(() => !$('princesses').hidden);
+  $('start-adventure').click(); await until(() => !$('combat').hidden);
+  assert($('finn-hp').value === 20 && $('combat-progress').textContent.includes('Andar 1 / 10'), 'Nova aventura reinicia HP, XP e progresso');
+  assert(d.documentElement.scrollWidth <= d.documentElement.clientWidth, 'Layout de 390px sem rolagem horizontal');
+  assert(errors.length === 0, `Sem erros JavaScript na interação: ${errors.join(', ') || 'nenhum'}`);
+}
+run().then(() => { output.textContent = `${results.join('\n')}\nDONE: ${results.filter(r => r.startsWith('PASS')).length} verificações aprovadas`; })
+  .catch(error => { output.textContent = `${results.join('\n')}\nFAIL: ${error.stack}`; });
+</script></html>

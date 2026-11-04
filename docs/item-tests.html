@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="pt-BR"><meta charset="utf-8"><title>Testes de itens DanMachi</title>
+<h1>Itens, equipamentos, drops, poções, fusão e salvamento</h1>
+<p>Os testes usam salvamento em memória, isolado da campanha real do jogador. A fixture de interface contém itens preparados para testar os casos de inventário cheio.</p>
+<pre id="results">Executando…</pre><iframe id="app" title="Teste da interface" style="width:390px;height:850px"></iframe>
+<script src="../items.js"></script><script src="../combat.js"></script><script src="../storage.js"></script>
+<script>
+'use strict';
+const I = window.DanMachiItems, R = window.DanMachi, S = window.DanMachiStorage;
+const results = [];
+const assert = (condition, label) => { if (!condition) throw new Error(label); results.push(`PASS: ${label}`); };
+const near = (a,b) => Math.abs(a-b)<1e-8;
+const princesses = [1,2,3].map(n=>({id:`p${n}`,name:`Princesa ${n}`,summary:'Resumo de teste'}));
+function create() { const s=R.createCampaign(princesses,()=>0.99); s.story='História de teste'; s.feedback='Intervalo de teste'; return s; }
+function interval() { const s=create(); s.phase='intermission'; s.enemy.hp=0; return s; }
+function add(s,type,rarity=0,attribute=null) { const item=I.createItem(s,type,rarity,attribute); const index=s.inventory.indexOf(null); if(index<0) throw new Error('Fixture cheia'); s.inventory[index]=item; return item; }
+function memory() { const values=new Map(); return {getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)}; }
+const delay=()=>new Promise(resolve=>setTimeout(resolve,20));
+async function until(check) { for(let n=0;n<500;n++){if(check())return;await delay();} throw new Error('Tempo excedido'); }
+async function run() {
+  let s=create();
+  assert(s.inventory.length===5 && s.inventory.every(x=>x===null) && s.equipment.sword.rarity===0 && !s.equipment.shield && !s.equipment.amulet,'Início: cinco espaços vazios e apenas espada comum equipada');
+  for(let rank=0;rank<5;rank++) {
+    s=interval(); I.equip(s,add(s,'sword',rank).id); I.equip(s,add(s,'shield',rank).id);
+    assert(I.effective(s).damage===15+10*(rank+1) && I.effective(s).armor===5*(rank+1),`Valores de espada e escudo: ${I.rarities[rank]}`);
+    I.equip(s,add(s,'amulet',rank,'damage').id);
+    assert(near(I.effective(s).damage,(15+10*(rank+1))*(1+(rank+1)*.05)),`Amuleto de dano: ${I.rarities[rank]}`);
+  }
+  s=interval(); const base=s.damage; const sword=add(s,'sword',2);
+  for(let n=0;n<10;n++){ I.equip(s,sword.id); I.unequip(s,'sword'); }
+  assert(s.damage===base && I.effective(s).damage===base,'Dez trocas não acumulam bônus nem alteram atributos base');
+  s=interval(); s.inventory=Array.from({length:5},()=>I.createItem(s,'sword'));
+  const old=s.equipment.sword; const replacement=s.inventory[0];
+  assert(I.equip(s,replacement.id).ok && s.inventory[0].id===old.id && s.inventory.filter(Boolean).length===5,'Troca com inventário cheio devolve equipamento antigo ao slot liberado');
+  const snapshot=JSON.stringify(s);
+  assert(!I.unequip(s,'sword').ok && JSON.stringify(s)===snapshot,'Desequipar com inventário cheio não perde itens');
+  s=interval(); s.hp=10; const life=add(s,'amulet',4,'maxHp'); I.equip(s,life.id);
+  assert(I.effective(s).maxHp===25 && s.hp===10,'Amuleto de Vida aumenta máximo sem curar');
+  s.hp=25; I.unequip(s,'amulet'); I.equip(s,life.id);
+  assert(s.hp===20 && I.effective(s).maxHp===25,'Trocar amuleto de Vida não cria cura infinita');
+  s=interval(); s.maxHp=100; I.equip(s,add(s,'amulet',2,'maxHp').id);
+  assert(I.effective(s).maxHp===115,'Percentual de Vida evita perda por erro de ponto flutuante');
+  s=interval(); s.armor=10; I.equip(s,add(s,'shield',0).id); I.equip(s,add(s,'amulet',3,'armor').id); I.consume(s,add(s,'armorPotion').id);
+  assert(near(I.effective(s).armor,20) && near(I.effective(s).defendingArmor,22),'Amuleto e poção afetam armadura base; Defender aumenta só escudo');
+  s.phase='combat';s.enemy.hp=1000;s.enemy.maxHp=1000;s.enemy.damage=25;R.playTurn(s,'defend');
+  assert(s.hp===17,'Contra-ataque usa defesa com escudo e bônus sem arredondamento intermediário');
+  s=interval(); I.equip(s,add(s,'amulet',2,'damage').id);I.consume(s,add(s,'damagePotion').id);s.phase='combat';s.enemy.hp=1000;s.enemy.maxHp=1000;s.enemy.armor=2;s.enemy.damage=0;
+  R.playTurn(s,'defend');assert(s.enemy.hp===984,'Dano com amuleto, poção, metade da ação e defesa arredonda uma única vez');
+  s=interval();s.luck=50;I.equip(s,add(s,'amulet',4,'luck').id);s.phase='combat';s.enemy.hp=1000;s.enemy.maxHp=1000;
+  R.playTurn(s,'attack',()=>.6);assert(s.enemy.hp===950 && I.effective(s).luck===62.5,'Sorte efetiva com decimais governa chance de crítico');
+  for(let rarity=0;rarity<5;rarity++) {s=interval();s.hp=1;const item=add(s,'heal',rarity);I.consume(s,item.id);assert(s.hp===Math.min(20,1+[7,10,15,20,30][rarity]),`Cura correta e limitada ao máximo: ${I.rarities[rarity]}`);}
+  s=interval();let item=add(s,'heal');assert(!I.consume(s,item.id).ok && s.inventory.some(x=>x?.id===item.id),'Cura com Vida cheia não consome a poção');
+  s.phase='combat';assert(!I.consume(s,item.id).ok && !I.equip(s,item.id).ok && !I.fuse(s).ok,'Consumo, equipamento e fusão bloqueados durante combate');
+  s=interval();I.consume(s,add(s,'damagePotion').id);s.buffs.damage=2;I.consume(s,add(s,'damagePotion',3).id);
+  assert(s.buffs.damage===5 && near(I.effective(s).damage,32.5),'Outra poção renova cinco ações sem acumular potência');
+  s.phase='combat';s.enemy.hp=1000;s.enemy.maxHp=1000;s.enemy.damage=0;
+  for(let n=0;n<5;n++) R.playTurn(s,'attack',()=>.99);
+  assert(s.enemy.hp===840 && s.buffs.damage===0,'Bônus vale exatamente cinco ações, incluindo a quinta');
+  R.playTurn(s,'attack',()=>.99);assert(s.enemy.hp===815,'Sexta ação usa dano sem o bônus expirado');
+  s=interval();s.battle=3;s.buffs.damage=4;s.buffs.armor=2;assert(R.nextBattle(s,()=>.99) && s.floor===2 && s.buffs.damage===4 && s.buffs.armor===2,'Trocar andar não consome duração dos efeitos');
+  s=create();s.buffs.damage=2;R.playTurn(s,'attack',()=>.99);const turns=s.buffs.damage;R.playTurn(s,'attack',()=>.99);
+  assert(turns===1 && s.buffs.damage===1,'Ataque letal consome uma ação; clique no intervalo não consome outra');
+
+  s=interval();s.inventory=Array.from({length:5},()=>I.createItem(s,'heal'));
+  I.setFusion(s,s.inventory[0].id,0);I.setFusion(s,s.inventory[1].id,1);assert(I.fuse(s).ok && s.inventory.filter(Boolean).length===4 && s.inventory[0].rarity===1,'Fusão com inventário cheio consome dois e ocupa um dos slots liberados');
+  for(const type of I.types) {s=interval();const a=add(s,type,0,type==='amulet'?'luck':null),b=add(s,type,0,type==='amulet'?'luck':null);I.setFusion(s,a.id,0);I.setFusion(s,b.id,1);assert(I.fuse(s).ok && s.inventory[0].rarity===1,`Fusão permitida: ${type}`);}
+  for(const [label,typeA,rankA,attrA,typeB,rankB,attrB] of [
+    ['tipos diferentes','sword',0,null,'shield',0,null],['raridades diferentes','heal',0,null,'heal',1,null],
+    ['lendários','sword',4,null,'sword',4,null],['atributos de amuleto diferentes','amulet',0,'luck','amulet',0,'damage']]) {
+    s=interval();const a=add(s,typeA,rankA,attrA),b=add(s,typeB,rankB,attrB);I.setFusion(s,a.id,0);I.setFusion(s,b.id,1);const before=JSON.stringify(s);const answer=I.fuse(s);
+    assert(!answer.ok && answer.message.length>0 && before===JSON.stringify(s),`Fusão inválida explica e preserva itens: ${label}`);
+  }
+  s=interval();item=add(s,'heal');I.setFusion(s,item.id,0);assert(!I.setFusion(s,item.id,1).ok && !I.setFusion(s,s.equipment.sword.id,1).ok,'Não funde item consigo mesmo nem equipamento ainda equipado');
+  I.discard(s,item.id);assert(s.fusion[0]===null,'Descartar item libera referências da fusão');
+
+  assert([0,.499999,.5,.849999,.85,.99999].map(x=>I.rollCount(()=>x)).join(',')==='1,1,2,2,3,3','Quantidade de drops respeita limites 50/35/15');
+  assert(I.rollType(()=>.24999)==='sword' && I.rollType(()=>.25)==='shield' && I.rollType(()=>.45)==='amulet' && I.rollType(()=>.6)==='heal' && I.rollType(()=>.9)==='damagePotion' && I.rollType(()=>.95)==='armorPotion','Categorias respeitam os intervalos exatos');
+  assert(I.rarityWeights(1,5).join(',')==='79,15,5,1,0','Raridades iniciais são 79/15/5/1/0');
+  for(let level=1;level<=10;level++) for(const luck of [0,5,5.25,20,61,100,1000]) {const weights=I.rarityWeights(level,luck);if(!near(weights.reduce((a,b)=>a+b,0),100)||weights[4]>5||weights.some(n=>n<0))throw new Error('Distribuição inválida');}
+  assert(near(I.rarityWeights(10,1000)[4],5),'Curva soma 100%, sem pesos negativos, e lendário nunca ultrapassa 5%');
+  let seed=123456789;const random=()=>{seed=(Math.imul(1664525,seed)+1013904223)>>>0;return seed/4294967296;};
+  const counts=[0,0,0],types=Array(6).fill(0),initial=Array(5).fill(0),maximum=Array(5).fill(0);
+  for(let n=0;n<100000;n++){counts[I.rollCount(random)-1]++;types[I.types.indexOf(I.rollType(random))]++;initial[I.rollRarity(1,5,random)]++;maximum[I.rollRarity(10,1000,random)]++;}
+  for(const [label,observed,expected] of [['quantidade',counts,[50,35,15]],['categorias',types,[25,20,15,30,5,5]],['raridade inicial',initial,[79,15,5,1,0]],['raridade máxima',maximum,I.rarityWeights(10,1000)]]) assert(observed.every((n,i)=>Math.abs(n/1000-expected[i])<.6),`100 mil amostras: ${label}, dentro de 0,6 ponto percentual`);
+  results.push(`AMOSTRAS: quantidades ${counts}; categorias ${types}; raridade inicial ${initial}; raridade máxima ${maximum}`);
+  s=interval();s.battle=3;const drops=I.generateDrops(s,()=>.99);const pending=JSON.stringify(s.rewards);
+  assert(drops.length===3 && !R.nextBattle(s) && I.generateDrops(s,()=>0).length===0 && JSON.stringify(s.rewards)===pending,'Drops únicos por andar, armazenados antes da decisão e bloqueando avanço');
+  const first=drops[0];assert(I.receiveReward(s,first.id).ok && !I.receiveReward(s,first.id).ok,'Receber recompensa é idempotente');
+  s.inventory=Array.from({length:5},()=>I.createItem(s,'sword'));const before=JSON.stringify(s);assert(!I.receiveReward(s,drops[1].id).ok && JSON.stringify(s)===before,'Inventário cheio exige decisão sem apagar item silenciosamente');
+  const replaced=s.inventory[2].id;assert(I.receiveReward(s,drops[1].id,replaced).ok && !s.inventory.some(x=>x.id===replaced),'Substituição remove só o item escolhido e recebe a recompensa');
+  assert(I.refuseReward(s,drops[2].id).ok && s.rewards.pending.length===0 && R.nextBattle(s,()=>.99),'Descartar a última recompensa libera avanço');
+  s=interval();s.floor=10;s.battle=3;I.generateDrops(s,()=>0);assert(s.rewards.pending.length===1 && !R.nextBattle(s),'Andar 10 concede drops antes do chefe');I.receiveReward(s,s.rewards.pending[0].id);assert(R.nextBattle(s)&&s.enemy.boss,'Chefe só começa após resolver recompensa do andar 10');
+
+  s=interval();s.battle=3;s.buffs.damage=3;I.generateDrops(s,()=>.99);item=add(s,'heal');I.setFusion(s,item.id,0);
+  const mem=memory();assert(S.save(s,mem).ok && S.valid(s),'Salvamento aceita estado completo de itens');
+  const restored=S.load(mem).state;assert(JSON.stringify(restored)===JSON.stringify(s),'Recupera inventário, equipamentos, efeitos, fusão e recompensas sem sortear novamente');
+  const invalid=JSON.parse(JSON.stringify(s));invalid.inventory[1]=invalid.inventory[0];assert(!S.valid(invalid),'Validação rejeita IDs duplicados no salvamento');
+  mem.setItem(S.key,'{invalid');assert(!S.load(mem).state,'JSON corrompido não trava o jogo');
+  mem.setItem(S.key,JSON.stringify({schemaVersion:99,state:s}));assert(!S.load(mem).state,'Versão incompatível permite nova aventura');
+  assert(!S.save(s,{setItem(){throw new Error('Sem espaço');}}).ok,'Falha de armazenamento é informada');
+  S.save(s,mem);s.phase='gameover';S.save(s,mem);assert(!mem.getItem(S.key),'Game Over apaga apenas a campanha salva');
+
+  // Fluxo real de interface, sem acesso ao estado interno do aplicativo.
+  const fixture=interval();fixture.hp=10;fixture.battle=3;
+  add(fixture,'sword',1);add(fixture,'shield');add(fixture,'heal');add(fixture,'heal');add(fixture,'armorPotion');
+  fixture.buffs={damage:2,armor:3};fixture.droppedFloors=[1];
+  fixture.rewards={floor:1,pending:[I.createItem(fixture,'amulet',4,'maxHp'),I.createItem(fixture,'damagePotion')]};
+  window.testStorage=memory();S.save(fixture,window.testStorage);
+  const frame=document.getElementById('app');const appHtml=await(await fetch('../index.html')).text();const root=new URL('../',location.href).href;
+  const setup=`<script>Object.defineProperty(window,'localStorage',{value:parent.testStorage});location.hash='combat';Math.random=()=>.99;fetch=async()=>{throw new TypeError('API não usada neste teste')};document.addEventListener('click',e=>{const a=e.target.closest('a[href^="#"]');if(a){e.preventDefault();location.hash=a.getAttribute('href')}});<\/script>`;
+  const page=appHtml.replaceAll('src="./',`src="${root}`).replace('href="./style.css"',`href="${root}style.css"`).replace('<head>','<head>'+setup);
+  let d,w;const $=id=>d.getElementById(id);const read=()=>S.load(window.testStorage).state;
+  async function load(){frame.srcdoc=page;await until(()=>frame.contentDocument?.getElementById('equipment-list')?.children.length===3 && !frame.contentDocument.getElementById('combat').hidden);d=frame.contentDocument;w=frame.contentWindow;}
+  async function reload(){frame.srcdoc='<!doctype html><p>Recarregando</p>';await delay();await load();}
+  await load();
+  assert($('inventory-slots').children.length===5 && $('equipment-list').children.length===3 && $('next-battle').disabled,'UI recupera cinco espaços, três equipamentos e recompensas pendentes');
+  const openIndex=index=>$('inventory-slots').children[index].querySelector('button').click();
+  openIndex(0);$('equip-item').click();assert(read().equipment.sword.rarity===1 && $('inventory-count').textContent==='5 / 5','Equipar pela janela troca espada com inventário cheio');
+  $('equipment-list').children[0].querySelector('button').click();$('unequip-item').click();assert($('item-detail-hint').textContent.includes('cheio') && read().equipment.sword.rarity===1,'Janela explica impedimento de desequipar com inventário cheio');$('close-item').click();
+  openIndex(0);$('fusion-first').click();openIndex(1);$('fusion-second').click();const beforeBad=JSON.stringify(read().inventory);$('fuse-items').click();assert($('item-status').textContent.includes('mesmo tipo') && JSON.stringify(read().inventory)===beforeBad,'Interface explica fusão incompatível sem consumir itens');
+  openIndex(2);$('fusion-first').click();openIndex(3);$('fusion-second').click();const beforeReload=JSON.stringify(read());await reload();
+  assert(JSON.stringify(read())===beforeReload && $('fusion-slots').querySelectorAll('[data-item-id]').length===2,'Atualizar mantém seleção de fusão, recompensas e contadores de efeitos');
+  $('fuse-items').click();assert(read().inventory[2].rarity===1 && $('inventory-count').textContent==='4 / 5','Fundir pela interface funciona com inventário inicialmente cheio');
+  $('reward-list').querySelector('[data-receive-id]').click();assert(read().inventory.filter(Boolean).length===5,'Receber preenche espaço livre do inventário');
+  $('reward-list').querySelector('[data-receive-id]').click();assert($('inventory-full').open && $('replace-reward').disabled,'Inventário cheio abre escolha explícita sem descarte automático');
+  const beforeCancel=JSON.stringify(read());$('cancel-replacement').click();assert(JSON.stringify(read())===beforeCancel,'Cancelar substituição mantém todos os itens e a recompensa');
+  $('reward-list').querySelector('[data-receive-id]').click();$('replacement-slot').value=read().inventory[4].id;$('replacement-slot').dispatchEvent(new w.Event('change'));$('replace-reward').click();
+  assert(read().inventory[4].type==='damagePotion' && !read().rewards.pending.length && !$('next-battle').disabled,'Substituição confirmada recebe item e libera próximo andar');
+  openIndex(4);$('use-item').click();assert(read().buffs.damage===5 && !read().inventory[4] && $('active-effects').textContent.includes('5 ações'),'Usar poção inicia cinco ações e consome só a poção selecionada');
+  openIndex(3);$('equip-item').click();assert($('finn-hp').max===25 && $('finn-hp').value===10,'Equipar amuleto de Vida pela UI aumenta máximo sem curar');
+  openIndex(2);$('use-item').click();assert($('finn-hp').value===20 && !read().inventory[2],'Poção fundida cura 10 HP e desaparece');
+  openIndex(0);$('discard-item').click();assert($('confirm-item').open,'Lixeira pede confirmação');$('confirm-no').click();assert(!!read().inventory[0],'Cancelar descarte preserva o item');
+  openIndex(0);$('discard-item').click();$('confirm-yes').click();assert(!read().inventory[0],'Confirmar descarte remove apenas item selecionado');
+  const persisted=JSON.stringify(read());await reload();assert(JSON.stringify(read())===persisted && read().buffs.damage===5 && read().equipment.amulet.rarity===4,'Recarregar mantém equipamentos, poção ativa e itens consumidos/descartados sem duplicação');
+  $('next-battle').click();assert(read().floor===2 && read().buffs.damage===5 && read().buffs.armor===3,'UI avança de andar preservando os efeitos temporários');
+  $('equipment-list').children[2].querySelector('button').click();assert($('unequip-item').disabled,'Equipamento não pode ser removido no meio do combate');
+  const turnBefore=read().turn;w.document.dispatchEvent(new w.KeyboardEvent('keydown',{key:'a',bubbles:true}));assert(read().turn===turnBefore,'Atalho de ataque não atravessa janela aberta');$('close-item').click();
+  for(const width of [320,390,768,1280]) {frame.style.width=width+'px';await delay();assert(d.documentElement.scrollWidth<=d.documentElement.clientWidth,`Sem rolagem horizontal em ${width}px`);}
+  results.push('UI: itens de teste foram fornecidos apenas pela fixture, sem alterar a campanha real.');
+}
+run().then(()=>document.getElementById('results').textContent=results.join('\n')+`\nDONE: ${results.filter(r=>r.startsWith('PASS')).length} verificações aprovadas`)
+ .catch(error=>document.getElementById('results').textContent=results.join('\n')+'\nFAIL: '+error.stack);
+</script></html>
